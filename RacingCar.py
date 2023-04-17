@@ -1,13 +1,14 @@
 import gym
 from stable_baselines3 import PPO, A2C
-from stable_baselines3.common.callbacks import BaseCallback, StopTrainingOnRewardThreshold
+from stable_baselines3.common.callbacks import BaseCallback, StopTrainingOnRewardThreshold, EvalCallback
 from stable_baselines3.common.vec_env import VecVideoRecorder, DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
 import os
 import imageio
 import cv2
 import numpy as np
 
-experiment_name = "PPO_cnn"
+experiment_name = "PPO_cnn_preprocessed"
 
 models_dir = f"models/{experiment_name}"
 logdir = "logs"
@@ -27,18 +28,26 @@ if not os.path.exists(vid_dir):
     os.makedirs(vid_dir)
 
 # Define custom callback to save best model
-class SaveBestModelCallback(BaseCallback):
-    def __init__(self, save_path, verbose=0):
-        super(SaveBestModelCallback, self).__init__(verbose)
-        self.save_path = models_dir
-        self.best_mean_reward = -float('inf')
-
-    def _on_step(self) -> bool:
-        mean_reward = self.model.logger.get_stats('ep_rew_mean')[0][1]
-        if mean_reward > self.best_mean_reward:
-            self.best_mean_reward = mean_reward
-            self.model.save(self.save_path)
-        return True
+# class SaveBestModelCallback(BaseCallback):
+#     def __init__(self, save_path, verbose=0):
+#         super(SaveBestModelCallback, self).__init__(verbose)
+#         self.save_path = save_path
+#         self.best_mean_reward = -float('inf')
+#
+#     def _on_step(self) -> bool:
+#         if isinstance(self.training_env.env.env, Monitor):
+#             if self.training_env.env.env.get_episode_rewards():  # Check if episode is done
+#                 episode_rewards = self.training_env.env.env.get_episode_rewards()
+#                 mean_reward = np.mean(episode_rewards)
+#                 if mean_reward > self.best_mean_reward:
+#                     self.best_mean_reward = mean_reward
+#                     self.model.save(self.save_path)
+#         else:
+#             mean_reward = np.mean(self.training_env.get_attr('episode_rewards')[-100:])
+#             if mean_reward > self.best_mean_reward:
+#                 self.best_mean_reward = mean_reward
+#                 self.model.save(self.save_path)
+#         return True
 
 class ImagePreprocessingWrapper(gym.ObservationWrapper):
     def __init__(self, env):
@@ -56,55 +65,44 @@ class ImagePreprocessingWrapper(gym.ObservationWrapper):
         # Convert grayscale image to RGB image
         obs = cv2.cvtColor(obs, cv2.COLOR_GRAY2RGB)
 
+        # Resize the image back to original
+        obs = cv2.resize(obs, (96, 72))
+
         return obs
 
-# Custom wrapper to convert CarRacing environment into a vectorized environment
-class CarRacingVecEnv(gym.Wrapper):
-    def __init__(self, env):
-        super(CarRacingVecEnv, self).__init__(env)
-        self.num_envs = 1
-
-    def reset(self):
-        return [self.env.reset()]
-
-    def step(self, actions):
-        obs, reward, done, info = self.env.step(actions[0])
-        return [obs], [reward], [done], [info]
 
 # Load racing car environment
 env = gym.make("CarRacing-v0")
 # Apply the custom image preprocessing wrapper
 env = ImagePreprocessingWrapper(env)
-# Convert CarRacing environment into a vectorized environment
-env = CarRacingVecEnv(env)
-# Wrap the vectorized environment with DummyVecEnv
-env = DummyVecEnv([lambda: env])
 # Reset the environment to get the initial observation
 obs = env.reset()
 
 # Load model
 model = PPO("CnnPolicy", env, verbose=1, device="cpu", tensorboard_log=logdir)
 
-# Create callback to save the best model
-save_best_model_callback = SaveBestModelCallback(f"{models_dir}/best_model", verbose=1)
+# # Create callback to save the best model
+# save_best_model_callback = SaveBestModelCallback(f"{models_dir}/best_model", verbose=1)
 
 # Create callback to stop training on reward threshold
-stop_training_callback = StopTrainingOnRewardThreshold(reward_threshold=950)
+# stop_training_callback = StopTrainingOnRewardThreshold(reward_threshold=950)
+
+#Create evaluation callback to monitor episode rewards during evaluation
+# eval_callback = EvalCallback(env, best_model_save_path=models_dir, log_path=logdir, eval_freq=1, n_eval_episodes=10)
 
 time_steps = 10000
-# Create video recorder
-video_recorder = VecVideoRecorder(env, vid_dir, record_video_trigger=lambda x: x == (time_steps - 1), video_length=300)
 
 for i in range(1,30):
     # Train the model with the callbacks
-    model.learn(total_timesteps=time_steps, reset_num_timesteps=False, tb_log_name="PPO_cnn", callback=[save_best_model_callback, stop_training_callback, video_recorder])
+    # model.learn(total_timesteps=time_steps, reset_num_timesteps=False, tb_log_name="PPO_cnn", callback=[save_best_model_callback, stop_training_callback])
+    model.learn(total_timesteps=time_steps, reset_num_timesteps=False, tb_log_name=experiment_name)
     # Save model every time_steps*i
     model.save(f"{models_dir}/{time_steps*i}")
 
-    # Check if the reward threshold has been reached
-    if stop_training_callback.reward_threshold_reached:
-        print("Training stopped: Reward threshold reached!")
-        break
+    # # Check if the reward threshold has been reached
+    # if stop_training_callback.reward_threshold_reached:
+    #     print("Training stopped: Reward threshold reached!")
+    #     break
 
 env.close()
 
