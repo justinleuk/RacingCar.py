@@ -8,7 +8,7 @@ import imageio
 import cv2
 import numpy as np
 
-experiment_name = "PPO_cnn_preprocessed"
+experiment_name = "PPO_cnn_gray_1m"
 
 models_dir = f"models/{experiment_name}"
 logdir = "logs"
@@ -53,23 +53,19 @@ class ImagePreprocessingWrapper(gym.ObservationWrapper):
     def __init__(self, env):
         super(ImagePreprocessingWrapper, self).__init__(env)
         # Update the observation space after image preprocessing
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(72, 96, 3), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(96, 96, 1), dtype=np.uint8)
 
     def observation(self, obs):
         # Convert image to grayscale
         obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
 
-        # Crop the image to retain only the top part
-        obs = obs[0:65, :]
+        # # Crop the image to retain only the top part
+        # obs = obs[:65, :]
 
-        # Convert grayscale image to RGB image
-        obs = cv2.cvtColor(obs, cv2.COLOR_GRAY2RGB)
-
-        # Resize the image back to original
-        obs = cv2.resize(obs, (96, 72))
+        # Add a new axis to create a single-channel image
+        obs = np.expand_dims(obs, axis=-1)
 
         return obs
-
 
 # Load racing car environment
 env = gym.make("CarRacing-v0")
@@ -92,7 +88,7 @@ model = PPO("CnnPolicy", env, verbose=1, device="cpu", tensorboard_log=logdir)
 
 time_steps = 10000
 
-for i in range(1,30):
+for i in range(1,100):
     # Train the model with the callbacks
     # model.learn(total_timesteps=time_steps, reset_num_timesteps=False, tb_log_name="PPO_cnn", callback=[save_best_model_callback, stop_training_callback])
     model.learn(total_timesteps=time_steps, reset_num_timesteps=False, tb_log_name=experiment_name)
